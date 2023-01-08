@@ -7,6 +7,7 @@ import torch
 import torch.utils.data as data_utils
 import torch.optim as optim
 from torch.autograd import Variable
+from sklearn.metrics import roc_auc_score
 
 from dataloader import MnistBags
 from model import Attention, GatedAttention
@@ -25,7 +26,7 @@ parser.add_argument('--mean_bag_length', type=int, default=10, metavar='ML',
                     help='average bag length')
 parser.add_argument('--var_bag_length', type=int, default=2, metavar='VL',
                     help='variance of bag length')
-parser.add_argument('--num_bags_train', type=int, default=200, metavar='NTrain',
+parser.add_argument('--num_bags_train', type=int, default=100, metavar='NTrain',
                     help='number of bags in training set')
 parser.add_argument('--num_bags_test', type=int, default=50, metavar='NTest',
                     help='number of bags in test set')
@@ -110,16 +111,29 @@ def test():
     model.eval()
     test_loss = 0.
     test_error = 0.
+
+    # Create lists to store ground truth labels and predicted scores
+    ground_truth = []
+    predicted_scores = []
+
     for batch_idx, (data, label) in enumerate(test_loader):
         bag_label = label[0]
         instance_labels = label[1]
         if args.cuda:
             data, bag_label = data.cuda(), bag_label.cuda()
         data, bag_label = Variable(data), Variable(bag_label)
+
+        # Make predictions using the model
         loss, attention_weights = model.calculate_objective(data, bag_label)
         test_loss += loss.data[0]
         error, predicted_label = model.calculate_classification_error(data, bag_label)
         test_error += error
+
+        # Store ground truth labels and predicted scores
+        predicted_score = attention_weights.cpu().data.numpy()
+        # Convert ground truth labels to binary labels
+        ground_truth.append(instance_labels.numpy().astype(int))
+        predicted_scores.append(predicted_score)
 
         if batch_idx < 5:  # plot bag labels and instance labels for first 5 bags
             bag_level = (bag_label.cpu().data.numpy()[0], int(predicted_label.cpu().data.numpy()[0][0]))
@@ -132,6 +146,14 @@ def test():
     test_error /= len(test_loader)
     test_loss /= len(test_loader)
 
+    # Flatten lists to 1D arrays
+    ground_truth = [item for sublist in ground_truth for item in sublist.flatten()]
+    predicted_scores = [item for sublist in predicted_scores for item in sublist.flatten()]
+
+    # Calculate AUC score
+    auc = roc_auc_score(ground_truth, predicted_scores)
+    print("AUC score: ", auc)
+
     print('\nTest Set, Loss: {:.4f}, Test error: {:.4f}'.format(test_loss.cpu().numpy()[0], test_error))
 
 
@@ -141,3 +163,4 @@ if __name__ == "__main__":
         train(epoch)
     print('Start Testing')
     test()
+    torch.save(model, 'MIL_mnist.pt')
